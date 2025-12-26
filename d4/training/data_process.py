@@ -85,94 +85,67 @@ def build_dataset_rank(
     def preprocess_function(examples):
         new_examples = {
             "attention_mask": [],
+            "target": [],
             "input_ids": [],
             "loss_mask": []
         }
-        for i in range(len(examples['id'])):
+        for i in range(len(examples)):
             messages = [
                 {"role": "system",
                  "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
             ]
             convroles = ["user", "assistant"]
-            roles = {"human": "user", "gpt": "assistant"}
-            source = examples['conversations'][i]
-            if not source:
+            roles = {"human", "user", "gpt", "assistant"}
+            source = examples['input'][i]
+            response = examples['output'][i]
+            if not source or source[0]["role"] not in roles:
                 continue
-            if roles[source[0]["from"]] != "user":
-                # Skip the first one if it is not from human
-                source = source[1:]
-            for j, sentence in enumerate(source):
-                role = roles[sentence["from"]]
-                assert role == convroles[j % 2], f"{i}"
-                # if sentence["from"]=="gpt":
-                #     sentence["value"]=" "+sentence["value"]
+            if len(source) > 1:
+                print(len(source))
+                print(source)
+            for msg in source:
                 messages.append(
-                    {"role": role, "content": sentence["value"]}
+                    {"role": msg["role"], "content": msg["content"]}
+                )
+            messages.append(
+                    {"role": "assistant", "content": response}
                 )
             conversation = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=False,
-            )
+            ).removesuffix("<|start_header_id|>assistant<|end_header_id|>\n\n")
 
             if not tokenizer.pad_token_id:
                 tokenizer.pad_token_id = tokenizer.unk_token_id
 
-            input_ids = tokenizer(
+            full_ids = tokenizer(
                 conversation,
                 return_tensors="pt",
                 add_special_tokens=False,
             ).input_ids[0]
+
             # filtering out the samples which is longer than max_len
-            if len(input_ids) > max_len:
+            if len(full_ids) > max_len:
                 continue
-            loss_mask = torch.ones_like(input_ids)
-            # print(i)
-
+            
+            
             sep = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+            turns = conversation.split(sep)
+            if len(turns) < 2:
+                continue
 
-            total_len = len(input_ids)
+            prompt = ""
+            for turn in turns[:-1]:
+                prompt += turn + sep
+            input_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False).input_ids[0]
+            target = full_ids[len(input_ids):]
 
-            sep2 = "<|eot_id|><|start_header_id|>user<|end_header_id|>"
-            turns = conversation.split(sep2)
-
-            turns[1] = turns[0] + sep2 + turns[1]
-            turns = turns[1:]
-
-            cur_len = 1
-            loss_mask[:cur_len] = 0
-            for i, turn in enumerate(turns):
-                if turn == "":
-                    break
-                turn_len = len(tokenizer(turn).input_ids)
-
-                parts = turn.split(sep)
-                if len(parts) != 2:
-                    break
-                parts[0] += sep
-                # "-2" is hardcoded for the Llama tokenizer to make the offset correct.
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 1
-
-                # Ignore the user instructions
-                if i == 0:
-                    loss_mask[cur_len: cur_len + instruction_len - 2] = 0
-                else:
-                    loss_mask[cur_len - 3: cur_len + instruction_len + 1] = 0
-                cur_len += turn_len
-                if i != 0:
-                    cur_len += 3
-                # cur_len+=2
-
-                # if i != 0 and not tokenizer.legacy:
-                #     # The legacy and non-legacy modes handle special tokens differently
-                #     cur_len -= 1
-
-            loss_mask[cur_len:] = 0
-            attention_mask = torch.ones_like(loss_mask)
+            attention_mask = torch.ones_like(input_ids)
 
             # new_examples["conversation"].append(conversation)
             new_examples["input_ids"].append(input_ids[None, :])
-            new_examples["loss_mask"].append(loss_mask[None, :])
+            new_examples["target"].append(target[None, :])
             new_examples["attention_mask"].append(attention_mask[None, :])
 
         return new_examples
@@ -187,126 +160,6 @@ def build_dataset_rank(
 
     ds1.set_format(type="torch")
     return ds1
-
-
-
-# def build_dataset_rank(
-#         tokenizer, datapath, max_len
-# ):
-
-#     # ds = load_dataset('json', data_files=datapath)
-#     ds = load_from_disk(datapath)
-#     # ds = ds['train']
-#     ds = ds.shuffle(seed=42)
-#     ds1 = ds
-#     original_columns1 = ds1.column_names
-#     num_proc = 8
-
-#     def preprocess_function(examples):
-#         new_examples = {
-#             "attention_mask": [],
-#             "input_ids": [],
-#             "loss_mask": []
-#         }
-#         for i in range(len(examples['id'])):
-#             messages = [
-#                 {"role": "system",
-#                  "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
-#             ]
-#             convroles = ["user", "assistant"]
-#             roles = {"human": "user", "gpt": "assistant"}
-#             source = examples['conversations'][i]
-#             if not source:
-#                 continue
-#             if roles[source[0]["from"]] != "user":
-#                 # Skip the first one if it is not from human
-#                 source = source[1:]
-#             for j, sentence in enumerate(source):
-#                 role = roles[sentence["from"]]
-#                 assert role == convroles[j % 2], f"{i}"
-#                 # if sentence["from"]=="gpt":
-#                 #     sentence["value"]=" "+sentence["value"]
-#                 messages.append(
-#                     {"role": role, "content": sentence["value"]}
-#                 )
-#             conversation = tokenizer.apply_chat_template(
-#                 messages,
-#                 tokenize=False,
-#                 add_generation_prompt=False,
-#             )
-
-#             if not tokenizer.pad_token_id:
-#                 tokenizer.pad_token_id = tokenizer.unk_token_id
-
-#             input_ids = tokenizer(
-#                 conversation,
-#                 return_tensors="pt",
-#                 add_special_tokens=False,
-#             ).input_ids[0]
-#             # filtering out the samples which is longer than max_len
-#             if len(input_ids) > max_len:
-#                 continue
-#             loss_mask = torch.ones_like(input_ids)
-#             # print(i)
-
-#             sep = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-
-#             total_len = len(input_ids)
-
-#             sep2 = "<|eot_id|><|start_header_id|>user<|end_header_id|>"
-#             turns = conversation.split(sep2)
-
-#             turns[1] = turns[0] + sep2 + turns[1]
-#             turns = turns[1:]
-
-#             cur_len = 1
-#             loss_mask[:cur_len] = 0
-#             for i, turn in enumerate(turns):
-#                 if turn == "":
-#                     break
-#                 turn_len = len(tokenizer(turn).input_ids)
-
-#                 parts = turn.split(sep)
-#                 if len(parts) != 2:
-#                     break
-#                 parts[0] += sep
-#                 # "-2" is hardcoded for the Llama tokenizer to make the offset correct.
-#                 instruction_len = len(tokenizer(parts[0]).input_ids) - 1
-
-#                 # Ignore the user instructions
-#                 if i == 0:
-#                     loss_mask[cur_len: cur_len + instruction_len - 2] = 0
-#                 else:
-#                     loss_mask[cur_len - 3: cur_len + instruction_len + 1] = 0
-#                 cur_len += turn_len
-#                 if i != 0:
-#                     cur_len += 3
-#                 # cur_len+=2
-
-#                 # if i != 0 and not tokenizer.legacy:
-#                 #     # The legacy and non-legacy modes handle special tokens differently
-#                 #     cur_len -= 1
-
-#             loss_mask[cur_len:] = 0
-#             attention_mask = torch.ones_like(loss_mask)
-
-#             # new_examples["conversation"].append(conversation)
-#             new_examples["input_ids"].append(input_ids[None, :])
-#             new_examples["loss_mask"].append(loss_mask[None, :])
-#             new_examples["attention_mask"].append(attention_mask[None, :])
-
-#         return new_examples
-
-#     ds1 = ds1.map(
-#         preprocess_function,
-#         batched=True,
-#         num_proc=num_proc,
-#         remove_columns=original_columns1,
-#         load_from_cache_file=False
-#     )
-
-#     ds1.set_format(type="torch")
-#     return ds1
 
 
 class DataCollatorWithPadding:
@@ -324,18 +177,78 @@ class DataCollatorWithPadding:
         outtensors = torch.cat((intensors, padding_tensor), dim=1)
         return outtensors
 
-    def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
-        max_length = max(item['input_ids'].shape[1] for item in features)
-        batch_input_ids = torch.cat([self.paddingtensor2D(item['input_ids'], max_length) for item in features])
-        batch_attention_mask = torch.cat(
-            [self.paddingtensor2D(item['attention_mask'], max_length) for item in features])
-        batch_loss_mask = torch.cat(
-            [self.paddingtensor2D(item['loss_mask'], max_length) for item in features])
+    def __call__(self, features: List[Dict[str, Any]], length: int = 4, mask_token_id: int = 126336, pad_token_id: int = 126081) -> Dict[str, Any]:
+        # ---- helpers: accept [T] or [1,T] and always use [T]
+        def _to_1d(x: torch.Tensor) -> torch.Tensor:
+            if x.dim() == 2 and x.size(0) == 1:
+                return x.squeeze(0)
+            return x
 
-        batch = {
+        B = len(features)
+        device = features[0]["input_ids"].device
+
+        input_ids_list = [_to_1d(f["input_ids"]) for f in features]          # [Li]
+        attn_mask_list = [_to_1d(f["attention_mask"]) for f in features]     # [Li]
+        target_list    = [_to_1d(f["target"]) for f in features]             # [Ti]
+
+        # ---- sample start indices uniformly for each example
+        # valid starts: 0..Ti-length (inclusive) => count = Ti-length+1
+        max_starts = torch.tensor(
+            [max(t.size(0) - length + 1, 1) for t in target_list],
+            device=device
+        )  # [B], clamp to >=1 to avoid errors if Ti < length
+
+        # uniform integer in [0, max_starts[i)-1]
+        starts = (torch.rand(B, device=device) * max_starts).long()  # [B]
+
+        # ---- compute final sequence lengths and max_length
+        seq_lens = []
+        for i in range(B):
+            prefix_len = int(starts[i].item())
+            seq_lens.append(input_ids_list[i].size(0) + prefix_len + length)
+        max_length = max(seq_lens)
+
+        # ---- allocate batch tensors (more efficient than per-item pad+cat)
+        dtype_ids = input_ids_list[0].dtype  # usually torch.long
+        batch_input_ids = torch.full((B, max_length), pad_token_id, dtype=dtype_ids, device=device)
+        batch_attention_mask = torch.zeros((B, max_length), dtype=attn_mask_list[0].dtype, device=device)
+        batch_loss_mask = torch.zeros((B, max_length), dtype=torch.long, device=device)  # usually bool/long
+
+        # target window: [B, length]
+        batch_target = torch.empty((B, length), dtype=target_list[0].dtype, device=device)
+
+        mask_tokens = torch.full((length,), mask_token_id, dtype=dtype_ids, device=device)
+
+        # ---- fill each row
+        for i in range(B):
+            inp = input_ids_list[i]
+            att = attn_mask_list[i]
+            tgt = target_list[i]
+
+            s = int(starts[i].item())
+            # clamp in case tgt shorter than length
+            s = min(s, max(tgt.size(0) - length, 0))
+
+            prefix = tgt[:s]  # [s]
+            window = tgt[s:s + length]  # [length] (or shorter if tgt too short)
+
+            # if tgt is shorter than length, pad window (rare if your data is valid)
+            if window.size(0) < length:
+                padded = torch.full((length,), pad_token_id, dtype=tgt.dtype, device=device)
+                padded[:window.size(0)] = window
+                window = padded
+
+            seq = torch.cat([inp, prefix.to(dtype_ids), mask_tokens], dim=0)  # [seq_len]
+            L = seq.size(0)
+
+            batch_input_ids[i, :L] = seq
+            batch_attention_mask[i, :L] = 1  # or: torch.cat([att, ones...]) if you need original attn pattern
+            batch_loss_mask[i, L - length:L] = 1  # only mask tokens contribute to loss
+            batch_target[i] = window
+
+        return {
             "input_ids": batch_input_ids,
-            "attention_mask": batch_attention_mask,
-            "loss_mask": batch_loss_mask,
+            "target": batch_target,                 # [B, length]
+            "attention_mask": batch_attention_mask, # [B, max_length]
+            "loss_mask": batch_loss_mask,           # [B, max_length]
         }
-        return batch
-

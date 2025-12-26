@@ -1967,6 +1967,9 @@ class LLaDATalkModel(nn.Module):
                     )
                 }
             )
+
+        self.fc = nn.Linear(config.d_model * 3, config.d_model)
+
         # When `init_device="meta"` FSDP will call `reset_parameters()` to initialize weights.
         if init_params and self.config.init_device != "meta":
             self.reset_parameters()
@@ -2165,6 +2168,9 @@ class LLaDATalkModel(nn.Module):
         # decoder layers
         all_hidden_states = []
 
+        # fuse rps back to size d
+        input_rps = self.fc(input_rps)
+
         # Apply blocks one-by-one.
         if self.config.block_group_size == 1:
             for block_idx, block in enumerate(self.transformer.blocks):
@@ -2282,9 +2288,6 @@ class D4ModelLM(PreTrainedModel):
         else:
             self.model = model
 
-        # added modules
-        self.fc = nn.Linear(config.d_model * 3, config.d_model)
-
         import json
         with open("./d4/model/talk_ml_config.json", "r") as f:
             cfg_dict = json.load(f)
@@ -2338,7 +2341,6 @@ class D4ModelLM(PreTrainedModel):
         print(f"Last hidden_states shape: {hidden_states[-1].shape}")
         mid = len(hidden_states) // 2
         rps = torch.concat([hidden_states[1], hidden_states[mid], hidden_states[-1]], dim=-1)
-        rps = self.fc(rps)
 
         loss = None
         if labels is not None:

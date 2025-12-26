@@ -100,9 +100,8 @@ if checkpoint_path:
 """
 data['inputs_ids']: [B, S + C]
 data['target']: [B, C]
-data['target_p']: [B, C, V]
 data['attention_mask]': [B, S + C]
-data['mask_mask']: [B, S + C]
+data['loss_mask']: [B, S + C]
 """
 
 for epoch in range(start_epoch, num_epochs):
@@ -112,9 +111,8 @@ for epoch in range(start_epoch, num_epochs):
     model.talking_ml.train()
     epoch_acces = [[] for _ in range(model.length)]
     epoch_plosses = [[] for _ in range(model.length)]
-    raise Exception("f")
     for batch_idx, data in enumerate(tqdm(train_loader)):
-        mask_bool = data['mask_mask'].bool()
+        mask_bool = data['loss_mask'].bool()
         
         model.zero_grad()
         with torch.no_grad():
