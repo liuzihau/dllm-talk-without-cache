@@ -2334,11 +2334,11 @@ class D4ModelLM(PreTrainedModel):
         )
         logits = outputs.logits
         hidden_states = outputs.hidden_states
-        if past_key_values is not None:
-            print(f"Last K shape: {past_key_values[-1][0].shape} Last V shape: {past_key_values[-1][1].shape}")
-        print(f"Input ids shape: {input_ids.shape}")
-        print(f"Logits shape: {logits.shape}")
-        print(f"Last hidden_states shape: {hidden_states[-1].shape}")
+        # if past_key_values is not None:
+        #     print(f"Last K shape: {past_key_values[-1][0].shape} Last V shape: {past_key_values[-1][1].shape}")
+        # print(f"Input ids shape: {input_ids.shape}")
+        # print(f"Logits shape: {logits.shape}")
+        # print(f"Last hidden_states shape: {hidden_states[-1].shape}")
         mid = len(hidden_states) // 2
         rps = torch.concat([hidden_states[1], hidden_states[mid], hidden_states[-1]], dim=-1)
 

@@ -146,12 +146,11 @@ for epoch in range(start_epoch, num_epochs):
                 output_hidden_states=True)
             
             logits = talk_outputs.logits
-            
-            V = logits.size(-1)
-            target_p = F.one_hot(data["target"], num_classes=V).float()
-
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
+            V = logits.size(-1)
+            data["target"] = data["target"].to(out_logp.device)
+            target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
             sum_logit = torch.sum(loss_mask * plogp, 2)
             loss = -sum_logit.mean()
