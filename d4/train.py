@@ -152,6 +152,7 @@ for epoch in range(start_epoch, num_epochs):
             data["target"] = data["target"].to(out_logp.device)
             target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
+            print(loss_mask.shape, plogp.shape)
             sum_logit = torch.sum(loss_mask * plogp, 2)
             loss = -sum_logit.mean()
             plosses.append(loss)
