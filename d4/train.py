@@ -43,6 +43,28 @@ def find_max_state_with_file(directory, filename="zero_to_fp32.py"):
         return None, 0
     return f"{directory}/state_{max_a}", max_a + 1
 
+def denoise_k_step(input_ids, target, loss_mask, k=1, generator=None):
+    device = input_ids.device
+    B, C = input_ids.shape
+
+    active = loss_mask.bool()
+    scores = torch.rand((B, C), device=device, generator=generator)
+    scores = scores.masked_fill(~active, float("-inf"))
+
+    # pick up to k active positions
+    idx = scores.topk(k=min(k, C), dim=1).indices    # [B, k]
+
+    # If some rows have <k active, topk will include -inf positions; filter them out:
+    chosen_active = active.gather(1, idx)            # [B, k] bool
+
+    rows = torch.arange(B, device=device).unsqueeze(1).expand_as(idx)  # [B, k]
+
+    rows = rows[chosen_active]
+    cols = idx[chosen_active]
+
+    input_ids[rows, cols] = target[rows, cols]
+    loss_mask[rows, cols] = 0
+    return input_ids, loss_mask
 
 # Args 
 parser = argparse.ArgumentParser(description='sp')
@@ -175,9 +197,10 @@ for epoch in range(start_epoch, num_epochs):
 
             plosses.append(loss)
             acces.append(acc.item())
+            input_ids, loss_mask = denoise_k_step(input_ids, loss_mask)
            
 
-        ploss_weight = [0.8 ** i for i in range(len(plosses))]
+        ploss_weight = [0.99 ** i for i in range(len(plosses))]
         ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
         loss = ploss
         model_engine.backward(loss)
