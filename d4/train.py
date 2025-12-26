@@ -183,6 +183,7 @@ for epoch in range(start_epoch, num_epochs):
             # calculate_ploss
             V = logits.size(-1)
             data["target"] = data["target"].to(out_logp.device)
+            loss_mask = loss_mask.to(out_logp.device)
             target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
             sum_logit = torch.sum(plogp, 2) * loss_mask
