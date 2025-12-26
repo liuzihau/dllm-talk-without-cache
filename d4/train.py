@@ -18,6 +18,17 @@ from model.modeling_d4 import D4ModelLM
 from training.data_process import build_dataset_rank, DataCollatorWithPadding
 from training.utils import AttrDict
 
+def print_param_summary(model):
+    total = trainable = 0
+    for n, p in model.named_parameters():
+        num = p.numel()
+        total += num
+        if p.requires_grad:
+            trainable += num
+    print(f"Total params:     {total:,}")
+    print(f"Trainable params: {trainable:,}")
+    print(f"Frozen params:    {total - trainable:,}")
+
 # calculate loss work only when one-hot target
 def calculate_ploss(out_logp, target, mask):
     denom = mask.sum().clamp_min(1e-6)
@@ -181,6 +192,7 @@ for epoch in range(start_epoch, num_epochs):
 
         input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
+        print_param_summary(model)
         for idx in range(model.length):
             talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
 
