@@ -149,6 +149,7 @@ for epoch in range(start_epoch, num_epochs):
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
             data["target"] = data["target"].to(out_logp.device)
+
             """
             V = logits.size(-1)
             target_p = F.one_hot(data["target"], num_classes=V).float()
@@ -160,7 +161,7 @@ for epoch in range(start_epoch, num_epochs):
             """
 
             # work only when one-hot target
-            mask = loss_mask.float()                      # [B, L]
+            mask = loss_mask.float().to(out_logp.device)  # [B, L]
             denom = mask.sum().clamp_min(1e-6)
 
             plogp = out_logp.gather(-1, data["target"].long().unsqueeze(-1)).squeeze(-1)  # [B, L]
