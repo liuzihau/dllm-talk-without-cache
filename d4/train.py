@@ -38,9 +38,6 @@ train_config = AttrDict(ds_config["training_parameters"])
 # Env related
 torch.backends.cuda.matmul.allow_tf32 = True
 set_seed(0)
-global_rank = deepspeed.comm.get_rank()
-rank = deepspeed.comm.get_local_rank()
-world_size = deepspeed.comm.get_world_size()
 
 
 # Model / Tokenizer 
@@ -52,6 +49,10 @@ model_engine, optimizer, _, _ = deepspeed.initialize(args=args,
                                                      model=model,
                                                      model_parameters=model.talking_ml.parameters(),
                                                      )
+
+global_rank = deepspeed.comm.get_rank()
+rank = deepspeed.comm.get_local_rank()
+world_size = deepspeed.comm.get_world_size()
 
 # Data
 traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
