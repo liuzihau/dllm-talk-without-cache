@@ -2169,7 +2169,7 @@ class LLaDATalkModel(nn.Module):
         all_hidden_states = []
 
         # fuse rps back to size d
-        if input_rps.shape[-1] == 3 * self.config['d_model']:
+        if input_rps.shape[-1] == 3 * self.config.d_model:
             input_rps = self.fc(input_rps)
 
         # Apply blocks one-by-one.
