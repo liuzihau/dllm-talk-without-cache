@@ -204,7 +204,7 @@ for epoch in range(start_epoch, num_epochs):
             # plosses.append(loss)
             # acces.append(acc.item())
             
-            input_ids, loss_mask = denoise_k_step(input_ids, data["target"], loss_mask)
+            input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
            
 
         ploss_weight = [0.99 ** i for i in range(len(plosses))]
