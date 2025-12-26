@@ -18,6 +18,31 @@ from model.modeling_d4 import D4ModelLM
 from training.data_process import build_dataset_rank, DataCollatorWithPadding
 from training.utils import AttrDict
 
+# calculate loss work only when one-hot target
+def calculate_ploss(out_logp, mask, target):
+    denom = mask.sum().clamp_min(1e-6)
+    plogp = out_logp.gather(-1, target.long().unsqueeze(-1)).squeeze(-1)  # [B, L]
+    return -(plogp * mask).sum() / denom
+
+def calculate_acc(logits, target, mask):
+    denom = mask.sum().clamp_min(1e-6)
+    pred = logits.argmax(dim=-1)  # [B, L]
+    return ((pred == target.long()).float() * mask).sum() / denom
+
+def find_max_state_with_file(directory, filename="zero_to_fp32.py"):
+    max_a = -1
+    for subdir in os.listdir(directory):
+        match = re.match(r"state_(\d+)", subdir)
+        if match:
+            a_value = int(match.group(1))
+            subdir_path = os.path.join(directory, subdir)
+            file_path = os.path.join(subdir_path, filename)
+            if os.path.isdir(subdir_path) and os.path.exists(file_path):
+                max_a = max(max_a, a_value)
+    if max_a == -1:
+        return None, 0
+    return f"{directory}/state_{max_a}", max_a + 1
+
 
 # Args 
 parser = argparse.ArgumentParser(description='sp')
@@ -77,22 +102,6 @@ train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=t
 
 os.makedirs(args.savedir, exist_ok=True)
 
-
-def find_max_state_with_file(directory, filename="zero_to_fp32.py"):
-    max_a = -1
-    for subdir in os.listdir(directory):
-        match = re.match(r"state_(\d+)", subdir)
-        if match:
-            a_value = int(match.group(1))
-            subdir_path = os.path.join(directory, subdir)
-            file_path = os.path.join(subdir_path, filename)
-            if os.path.isdir(subdir_path) and os.path.exists(file_path):
-                max_a = max(max_a, a_value)
-    if max_a == -1:
-        return None, 0
-    return f"{directory}/state_{max_a}", max_a + 1
-
-
 checkpoint_path, start_epoch = find_max_state_with_file(args.savedir)
 if checkpoint_path:
     print(f"load from {checkpoint_path}")
@@ -148,10 +157,10 @@ for epoch in range(start_epoch, num_epochs):
             logits = talk_outputs.logits
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
-            data["target"] = data["target"].to(out_logp.device)
 
-            """
+            """ calculate_ploss
             V = logits.size(-1)
+            data["target"] = data["target"].to(out_logp.device)
             target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
             sum_logit = torch.sum(loss_mask * plogp, 2)
@@ -159,18 +168,12 @@ for epoch in range(start_epoch, num_epochs):
             plosses.append(loss)
             acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
             """
-
-            # work only when one-hot target
+            target = data["target"].to(out_logp.device)
             mask = loss_mask.float().to(out_logp.device)  # [B, L]
-            denom = mask.sum().clamp_min(1e-6)
-
-            plogp = out_logp.gather(-1, data["target"].long().unsqueeze(-1)).squeeze(-1)  # [B, L]
-            loss = -(plogp * mask).sum() / denom
+            loss = calculate_ploss(out_logp, loss_mask, target)
+            acc = calculate_acc()
 
             plosses.append(loss)
-
-            pred = logits.argmax(dim=-1)  # [B, L]
-            acc = ((pred == data["target"].long()).float() * mask).sum() / denom
             acces.append(acc.item())
            
 
