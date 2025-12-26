@@ -1,8 +1,25 @@
+import os, re, json
 import argparse
+from dataclasses import dataclass, field
+from safetensors import safe_open
+import numpy as np
+import torch
+from torch import nn, optim
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import PreTrainedTokenizerBase, get_linear_schedule_with_warmup
+# import accelerate
+from accelerate.utils import set_seed
 import deepspeed
+from tqdm import tqdm
 
+from model.modeling_d4 import D4ModelLM
+from training.data_process import build_dataset_rank, DataCollatorWithPadding
+from training.utils import AttrDict
+
+
+# Args 
 parser = argparse.ArgumentParser(description='sp')
-# parser.add_argument('--basepath', type=str, default='meta-llama/Llama-3.2-3B-Instruct')
 parser.add_argument('--trainpath', type=str,
                     default="nvidia/Llama-Nemotron-Post-Training-Dataset")
 parser.add_argument('--testpath', type=str,
@@ -12,72 +29,43 @@ parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for d
 parser = deepspeed.add_config_arguments(parser)
 args = parser.parse_args()
 
-import json
-import re
-
-class AttrDict(dict):
-    def __init__(self, *args, **kwargs):
-        super(AttrDict, self).__init__(*args, **kwargs)
-        self.__dict__ = self
-
+# Config
 deepspeed_config = args.deepspeed_config
 with open(deepspeed_config) as f:
     ds_config = json.load(f)
+train_config = AttrDict(ds_config["training_parameters"])
 
-train_config = AttrDict({
-    "bs": ds_config["train_micro_batch_size_per_gpu"],
-    "num_epochs": 40,
-    "num_workers": 2,
-    "max_len": 4096,
-    "config_path": "model/talk_ml_config.json",
-    "gradient_checkpointing": True
-})
-
-from safetensors import safe_open
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-import torch
-
+# Env related
 torch.backends.cuda.matmul.allow_tf32 = True
-from accelerate.utils import set_seed
-
 set_seed(0)
-from model.modeling_d4 import D4ModelLM
-# from configs import EConfig
-# from datasets import load_dataset, load_from_disk
-from dataclasses import dataclass, field
-
-from torch import nn, optim
-from torch.utils.data import Dataset, DataLoader, DistributedSampler
-from tqdm import tqdm
-# import accelerate
-import numpy as np
-from transformers import PreTrainedTokenizerBase, get_linear_schedule_with_warmup
-
-from training.data_process import build_dataset_rank, DataCollatorWithPadding
+global_rank = deepspeed.comm.get_rank()
+rank = deepspeed.comm.get_local_rank()
+world_size = deepspeed.comm.get_world_size()
 
 
+# Model / Tokenizer 
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
-# traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
-# testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
-
-# config = EConfig.from_pretrained(train_config["config_path"])
 model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
-# model.scandata(args.trainpath, args.basepath)
-
 criterion = nn.SmoothL1Loss(reduction="none")
-
 num_epochs = train_config["num_epochs"]
-
 model_engine, optimizer, _, _ = deepspeed.initialize(args=args,
                                                      model=model,
                                                      model_parameters=model.talking_ml.parameters(),
                                                      )
 
-global_rank = deepspeed.comm.get_rank()
-rank = deepspeed.comm.get_local_rank()
-world_size = deepspeed.comm.get_world_size()
+# Data
+traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
+testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
+sampler = DistributedSampler(testdataset, num_replicas=world_size, rank=global_rank, shuffle=False)
+test_loader = DataLoader(testdataset, batch_size=train_config["bs"], sampler=sampler, num_workers=4, pin_memory=True,
+                         collate_fn=DataCollatorWithPadding())
+
+train_sampler = DistributedSampler(traindataset, num_replicas=world_size, rank=global_rank, shuffle=True)
+train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=train_sampler, num_workers=4,
+                          pin_memory=True,
+                          collate_fn=DataCollatorWithPadding())
+
+# Logging / checkpoints
 if global_rank == 0:
     import wandb
 
@@ -85,15 +73,6 @@ if global_rank == 0:
     wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
 
 os.makedirs(args.savedir, exist_ok=True)
-
-# sampler = DistributedSampler(testdataset, num_replicas=world_size, rank=global_rank, shuffle=False)
-# test_loader = DataLoader(testdataset, batch_size=train_config["bs"], sampler=sampler, num_workers=4, pin_memory=True,
-                        #  collate_fn=DataCollatorWithPadding())
-
-# train_sampler = DistributedSampler(traindataset, num_replicas=world_size, rank=global_rank, shuffle=True)
-# train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=train_sampler, num_workers=4,
-                        #   pin_memory=True,
-                        #   collate_fn=DataCollatorWithPadding())
 
 
 def find_max_state_with_file(directory, filename="zero_to_fp32.py"):
