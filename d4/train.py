@@ -203,6 +203,7 @@ for epoch in range(start_epoch, num_epochs):
         ploss_weight = [0.99 ** i for i in range(len(plosses))]
         ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
         loss = ploss
+        print(f"before scale:{plosses}, after scale: {loss}")
         model_engine.backward(loss)
 
         model_engine.step()
