@@ -48,7 +48,12 @@ def denoise_k_step(input_ids, target, loss_mask, k=1, generator=None):
     B, C = input_ids.shape
 
     active = loss_mask.bool()
-    scores = torch.rand((B, C), device=device, generator=generator)
+    if generator is not None:
+        # Ensure generator is on the same device
+        assert generator.device == device
+        scores = torch.rand((B, C), device=device, generator=generator)
+    else:
+        scores = torch.rand((B, C), device=device)
     scores = scores.masked_fill(~active, float("-inf"))
 
     # pick up to k active positions
@@ -182,8 +187,8 @@ for epoch in range(start_epoch, num_epochs):
 
             # calculate_ploss
             V = logits.size(-1)
-            data["target"] = data["target"].to(out_logp.device)
-            loss_mask = loss_mask.to(out_logp.device)
+            data["target"] = data["target"].to(rank)
+            loss_mask = loss_mask.to(rank)
             target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
             sum_logit = torch.sum(plogp, 2) * loss_mask
