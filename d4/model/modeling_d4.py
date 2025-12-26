@@ -2262,7 +2262,7 @@ def create_model_config_from_pretrained_config(config: LLaDAConfig):
     return model_config
 
 
-class LLaDAModelLM(PreTrainedModel):
+class D4ModelLM(PreTrainedModel):
     """
     Extremely barebones HF model wrapper.
     """
@@ -2293,6 +2293,67 @@ class LLaDAModelLM(PreTrainedModel):
         talk_ml_cfg.init_device = "cpu"
         self.talking_ml = LLaDATalkModel(talk_ml_cfg, init_params=init_params)
 
+        self.length = 4 # hardcording
+
+
+    def run_thought_model(
+        self,
+        input_ids: torch.LongTensor = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        inputs_repres: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        attention_bias: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        replace_position: Optional[torch.Tensor] = None,  # This is a hack mitigation of an issue in transformers `4.39.x`
+    ) -> Union[Tuple, CausalLMOutputWithPast]:
+        if use_cache is None:
+            use_cache = self.config.use_cache
+
+        if output_attentions:
+            raise ValueError("output_attentions is not yet supported in LLaDA")
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+ 
+        outputs = self.model.forward(
+                input_ids=input_ids,
+                input_embeddings=inputs_embeds,
+                attention_mask=attention_mask,
+                attention_bias=attention_bias,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_hidden_states=True, #output_hidden_states,
+                replace_position=replace_position,
+        )
+        logits = outputs.logits
+        hidden_states = outputs.hidden_states
+        if past_key_values is not None:
+            print(f"Last K shape: {past_key_values[-1][0].shape} Last V shape: {past_key_values[-1][1].shape}")
+        print(f"Input ids shape: {input_ids.shape}")
+        print(f"Logits shape: {logits.shape}")
+        print(f"Last hidden_states shape: {hidden_states[-1].shape}")
+        mid = len(hidden_states) // 2
+        rps = torch.concat([hidden_states[1], hidden_states[mid], hidden_states[-1]], dim=-1)
+        rps = self.fc(rps)
+
+        loss = None
+        if labels is not None:
+            import warnings
+            warnings.warn("Note that for LLaDA, you cannot calculate the loss here.", UserWarning)
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return CausalLMOutputWithPast(
+            logits=logits,
+            past_key_values=outputs.attn_key_values,
+            hidden_states=rps,
+        )
+
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -2318,41 +2379,19 @@ class LLaDAModelLM(PreTrainedModel):
         # import pdb; pdb.set_trace()
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         if inputs_repres is None:
-            outputs = self.model.forward(
+            return self.run_thought_model(
                 input_ids=input_ids,
-                input_embeddings=inputs_embeds,
+                inputs_embeds=inputs_embeds,
+                inputs_repres=inputs_repres,
                 attention_mask=attention_mask,
                 attention_bias=attention_bias,
                 past_key_values=past_key_values,
+                labels=labels,
                 use_cache=use_cache,
-                output_hidden_states=True, #output_hidden_states,
-                replace_position=replace_position,
-            )
-            # import pdb; pdb.set_trace()
-            logits = outputs.logits
-            hidden_states = outputs.hidden_states
-            if past_key_values is not None:
-                print(f"Last K shape: {past_key_values[-1][0].shape} Last V shape: {past_key_values[-1][1].shape}")
-            print(f"Input ids shape: {input_ids.shape}")
-            print(f"Logits shape: {logits.shape}")
-            print(f"Last hidden_states shape: {hidden_states[-1].shape}")
-            mid = len(hidden_states) // 2
-            rps = torch.concat([hidden_states[1], hidden_states[mid], hidden_states[-1]], dim=-1)
-            rps = self.fc(rps)
-
-            loss = None
-            if labels is not None:
-                import warnings
-                warnings.warn("Note that for LLaDA, you cannot calculate the loss here.", UserWarning)
-            if not return_dict:
-                output = (logits,) + outputs[1:]
-                return (loss,) + output if loss is not None else output
-
-            return CausalLMOutputWithPast(
-                logits=logits,
-                past_key_values=outputs.attn_key_values,
-                hidden_states=rps,
-            )
+                output_attentions=output_attentions,
+                output_hidden_states=True,
+                return_dict=return_dict,
+                replace_position=replace_position)
         else:
             outputs = self.talking_ml(
                 input_ids=input_ids,
@@ -2369,7 +2408,6 @@ class LLaDAModelLM(PreTrainedModel):
                 past_key_values=past_key_values,
                 hidden_states=hidden_states,
             )
-
 
     def can_generate(self) -> bool:
         return True
@@ -2410,4 +2448,4 @@ class LLaDAModelLM(PreTrainedModel):
             self.model.transformer.ff_out = self.model.transformer.wte
 
 # Register the model so that it is available for transformer pipelines, auto-loading, etc.
-AutoModel.register(LLaDAConfig, LLaDAModelLM)
+AutoModel.register(LLaDAConfig, D4ModelLM)

@@ -20,11 +20,11 @@ import argparse
 
 from generate import generate, generate_with_prefix_cache, generate_with_dual_cache
 from transformers import AutoTokenizer, AutoModel
-from model.modeling_d4 import LLaDAModelLM
+from model.modeling_d4 import D4ModelLM
 
 def chat(args):
     device = 'cuda'
-    model = LLaDAModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16).to(device).eval()
+    model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True)
 
     gen_length = args.gen_length
@@ -47,6 +47,8 @@ def chat(args):
         else:
             prompt = torch.cat([prompt, input_ids[:, 1:]], dim=1)
         print(f'use cache: {args.use_cache} use cache position: {args.if_cache_position} threshold: {args.threshold} block size: {args.block_size}')
+        import time
+        start = time.time()
         if args.use_cache:
             if args.if_cache_position:
                 out, nfe = generate_with_dual_cache(model, prompt, steps=steps, gen_length=gen_length, block_length=args.block_size, temperature=0., remasking='low_confidence', threshold=args.threshold)
@@ -56,6 +58,7 @@ def chat(args):
             out, nfe = generate(model, prompt, steps=steps, gen_length=gen_length, block_length=args.block_size, temperature=0., remasking='low_confidence', threshold=args.threshold)
 
         answer = tokenizer.batch_decode(out[:, prompt.shape[1]:], skip_special_tokens=True)[0]
+        print(f"Total inference time: {time.time()-start:.4f}")
         print(f"Bot's reply: {answer}")
         print(f"Number of forward passes: {nfe}")
 

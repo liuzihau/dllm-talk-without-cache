@@ -20,7 +20,7 @@ import numpy as np
 import torch.nn.functional as F
 import os
 from transformers import AutoTokenizer, AutoModel
-from model.modeling_d4 import LLaDAModelLM
+from model.modeling_d4 import D4ModelLM
 
 from torch.cuda import nvtx
 
@@ -163,6 +163,7 @@ def generate_with_prefix_cache(model, prompt, steps=128, gen_length=128, block_l
         num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps)
 
         output = model(x, use_cache=True)
+        rps = output.hidden_states
         past_key_values = output.past_key_values
 
         mask_index = (x == mask_id)
@@ -172,6 +173,7 @@ def generate_with_prefix_cache(model, prompt, steps=128, gen_length=128, block_l
         else:
             x0, transfer_index = get_transfer_index_dynamic(output.logits, temperature, remasking, mask_index, x, None, factor)
         x[transfer_index] = x0[transfer_index]
+        rps = rps[:, current_block_start:]
 
         new_past_key_values = []
         for i in range(len(past_key_values)):
@@ -183,14 +185,13 @@ def generate_with_prefix_cache(model, prompt, steps=128, gen_length=128, block_l
         nfe += 1
         
         i = 1
-        rps = None
         while True:
             if (x[:, current_block_start:current_block_end] == mask_id).sum() == 0:
                 break
             nfe += 1
             mask_index = (x[:, current_block_start:] == mask_id)
             mask_index[:, block_length:] = 0
-            print(f"Forward pass: {nfe}")
+            # print(f"Forward pass: {nfe}")
             outputs = model(x[:, current_block_start:], inputs_repres=rps, past_key_values=past_key_values, use_cache=True)
             logits = outputs.logits
             rps = outputs.hidden_states
