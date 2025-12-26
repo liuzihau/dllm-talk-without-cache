@@ -64,12 +64,21 @@ def denoise_k_step(input_ids, target, loss_mask, k=1, generator=None):
 
     rows = torch.arange(B, device=device).unsqueeze(1).expand_as(idx)  # [B, k]
 
+    # 1. Clone input_ids so we don't modify the version used by the previous forward pass
+    input_ids = input_ids.clone() 
+    
+    # 2. Clone loss_mask if it is also part of the graph (though usually it's just a buffer)
+    loss_mask = loss_mask.clone()
+
     rows = rows[chosen_active]
     cols = idx[chosen_active]
 
+    # Now this modification is safe because it happens on the clone
     input_ids[rows, cols] = target[rows, cols]
     loss_mask[rows, cols] = 0
+    
     return input_ids, loss_mask
+
 
 # Args 
 parser = argparse.ArgumentParser(description='sp')
@@ -237,7 +246,7 @@ for epoch in range(start_epoch, num_epochs):
             acc = correct.float().sum() / (loss_mask.sum() + 1e-6)
             acces.append(acc.item())
 
-            
+
             input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
            
 
