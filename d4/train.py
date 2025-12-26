@@ -134,7 +134,7 @@ for epoch in range(start_epoch, num_epochs):
         acces = []
         loss_mask = torch.ones_like(data["target"])
 
-        input_ids = data['inputs_ids'][mask_bool].view(data['inputs_ids'].size(0), -1)
+        input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
         for idx in range(model.length):
         
