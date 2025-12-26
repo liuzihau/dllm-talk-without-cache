@@ -5,6 +5,7 @@ from safetensors import safe_open
 import numpy as np
 import torch
 from torch import nn, optim
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, DistributedSampler
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import PreTrainedTokenizerBase, get_linear_schedule_with_warmup
@@ -57,6 +58,7 @@ world_size = deepspeed.comm.get_world_size()
 # Data
 traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
 testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
+
 sampler = DistributedSampler(testdataset, num_replicas=world_size, rank=global_rank, shuffle=False)
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], sampler=sampler, num_workers=4, pin_memory=True,
                          collate_fn=DataCollatorWithPadding())
@@ -67,11 +69,11 @@ train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=t
                           collate_fn=DataCollatorWithPadding())
 
 # Logging / checkpoints
-if global_rank == 0:
-    import wandb
+# if global_rank == 0:
+#     import wandb
 
-    wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
-    wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
+#     wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
+#     wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
 
 os.makedirs(args.savedir, exist_ok=True)
 
@@ -142,33 +144,35 @@ for epoch in range(start_epoch, num_epochs):
                 attention_mask=data["attention_mask"].to(rank),
                 use_cache=False,
                 output_hidden_states=True)
-           
+            
+            V = logits.size(-1)
+            target_p = F.one_hot(data["target"], num_classes=V).float()
+
             logits = talk_outputs.logits
+            
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
-            plogp = data["target_p"] * out_logp
+            plogp = target_p * out_logp
             sum_logit = torch.sum(loss_mask * plogp, 2)
             loss = -sum_logit.mean()
             plosses.append(loss)
-            acces.append(((logits.argmax(-1) == data["target_p"].argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
+            acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
            
-
 
         ploss_weight = [0.8 ** i for i in range(len(plosses))]
         ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
         loss = ploss
         model_engine.backward(loss)
 
-
         model_engine.step()
 
-        if global_rank == 0:
-            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"]}
-            for i in range(len(plosses)):
-                logdict[f"train/ploss_{i}"] = plosses[i].item()
-            for i in range(len(acces)):
-                logdict[f"train/acc_{i}"] = acces[i]
-            wandb.log(logdict)
+        # if global_rank == 0:
+        #     logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"]}
+        #     for i in range(len(plosses)):
+        #         logdict[f"train/ploss_{i}"] = plosses[i].item()
+        #     for i in range(len(acces)):
+        #         logdict[f"train/acc_{i}"] = acces[i]
+        #     wandb.log(logdict)
         epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
         epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
 
@@ -177,17 +181,17 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
-        if global_rank == 0:
-            wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+        # if global_rank == 0:
+        #     wandb.log({f"train/epochacc_{i}": acc_i})
+        #     print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
         deepspeed.comm.all_reduce(loss_i, op=deepspeed.comm.ReduceOp.AVG)
         loss_i = loss_i.item()
-        if global_rank == 0:
-            wandb.log({f"train/epochploss_{i}": loss_i})
-            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+        # if global_rank == 0:
+        #     wandb.log({f"train/epochploss_{i}": loss_i})
+        #     print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
 
     epoch_acces = [[] for _ in range(model.length)]
     epoch_plosses = [[] for _ in range(model.length)]
@@ -205,17 +209,17 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
-        if global_rank == 0:
-            wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+        # if global_rank == 0:
+        #     wandb.log({f"test/epochacc_{i}": acc_i})
+        #     print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
         deepspeed.comm.all_reduce(loss_i, op=deepspeed.comm.ReduceOp.AVG)
         loss_i = loss_i.item()
-        if global_rank == 0:
-            wandb.log({f"test/epochploss_{i}": loss_i})
-            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+        # if global_rank == 0:
+        #     wandb.log({f"test/epochploss_{i}": loss_i})
+        #     print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
     # clear out the redundance cahce after each step
     torch.cuda.empty_cache()
 
