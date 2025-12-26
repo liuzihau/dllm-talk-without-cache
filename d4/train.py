@@ -180,7 +180,7 @@ for epoch in range(start_epoch, num_epochs):
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
 
-            """ calculate_ploss
+            # calculate_ploss
             V = logits.size(-1)
             data["target"] = data["target"].to(out_logp.device)
             target_p = F.one_hot(data["target"], num_classes=V).float()
@@ -189,15 +189,16 @@ for epoch in range(start_epoch, num_epochs):
             loss = -sum_logit.mean() 
             plosses.append(loss)
             acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
-            """
-            target = data["target"].to(out_logp.device)
-            mask = loss_mask.float().to(out_logp.device)  # [B, L]
-            loss = calculate_ploss(out_logp, target, mask)
-            acc = calculate_acc(logits, target, mask)
+            
+            # target = data["target"].to(out_logp.device)
+            # mask = loss_mask.float().to(out_logp.device)  # [B, L]
+            # loss = calculate_ploss(out_logp, target, mask)
+            # acc = calculate_acc(logits, target, mask)
 
-            plosses.append(loss)
-            acces.append(acc.item())
-            input_ids, loss_mask = denoise_k_step(input_ids, target, loss_mask)
+            # plosses.append(loss)
+            # acces.append(acc.item())
+            
+            input_ids, loss_mask = denoise_k_step(input_ids, data["target"], loss_mask)
            
 
         ploss_weight = [0.99 ** i for i in range(len(plosses))]
