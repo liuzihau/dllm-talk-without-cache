@@ -187,15 +187,15 @@ for epoch in range(start_epoch, num_epochs):
             out_logp = nn.LogSoftmax(dim=2)(logits)
 
             # calculate_ploss
-            V = logits.size(-1)
-            data["target"] = data["target"].to(rank)
-            loss_mask = loss_mask.to(rank)
-            target_p = F.one_hot(data["target"], num_classes=V).float()
-            plogp = target_p * out_logp
-            sum_logit = torch.sum(plogp, 2) * loss_mask
-            loss = -sum_logit.mean() 
-            plosses.append(loss)
-            acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
+            # V = logits.size(-1)
+            # data["target"] = data["target"].to(rank)
+            # loss_mask = loss_mask.to(rank)
+            # target_p = F.one_hot(data["target"], num_classes=V).float()
+            # plogp = target_p * out_logp
+            # sum_logit = torch.sum(plogp, 2) * loss_mask
+            # loss = -sum_logit.mean() 
+            # plosses.append(loss)
+            # acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
             
             # target = data["target"].to(out_logp.device)
             # mask = loss_mask.float().to(out_logp.device)  # [B, L]
@@ -204,6 +204,39 @@ for epoch in range(start_epoch, num_epochs):
 
             # plosses.append(loss)
             # acces.append(acc.item())
+            
+
+            # --- CORRECTED LOSS CALCULATION START ---
+            V = logits.size(-1)
+            data["target"] = data["target"].to(rank)
+            loss_mask = loss_mask.to(rank)
+
+            # Instead of one-hot multiplication, gather the log-prob of the correct indices
+            # data["target"] shape: [B, L] -> unsqueeze to [B, L, 1] for gather
+            target_indices = data["target"].unsqueeze(-1).long()
+
+            # Gather values along the vocab dimension (dim=2)
+            # resulting shape: [B, L, 1] -> squeeze back to [B, L]
+            target_logp = out_logp.gather(2, target_indices).squeeze(2)
+
+            # Calculate loss only on valid tokens
+            # We use negative log likelihood: -log(p)
+            masked_logp = target_logp * loss_mask
+            loss = -masked_logp.mean()
+
+            # Note: If loss_mask can be all zeros, mean() might be weak. 
+            # You might prefer: loss = -(masked_logp.sum() / (loss_mask.sum() + 1e-6))
+            # But keeping consistent with your snippet:
+            # --- CORRECTED LOSS CALCULATION END ---
+
+            plosses.append(loss)
+
+            # Calculate Accuracy (for logging)
+            pred = logits.argmax(dim=-1)
+            correct = (pred == data["target"]) & loss_mask.bool()
+            acc = correct.float().sum() / (loss_mask.sum() + 1e-6)
+            acces.append(acc.item())
+
             
             input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
            
