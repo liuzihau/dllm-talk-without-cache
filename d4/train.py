@@ -148,15 +148,29 @@ for epoch in range(start_epoch, num_epochs):
             logits = talk_outputs.logits
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
+            """
             V = logits.size(-1)
             data["target"] = data["target"].to(out_logp.device)
             target_p = F.one_hot(data["target"], num_classes=V).float()
             plogp = target_p * out_logp
-            print(loss_mask.shape, plogp.shape)
             sum_logit = torch.sum(loss_mask * plogp, 2)
-            loss = -sum_logit.mean()
+            loss = -sum_logit.mean() 
             plosses.append(loss)
             acces.append(((logits.argmax(-1) == target_p.argmax(-1)) * loss_mask.squeeze(-1)).sum().item() / (loss_mask.sum().item() + 1e-6))
+            """
+
+            # work only when one-hot target
+            mask = loss_mask.float()                      # [B, L]
+            denom = mask.sum().clamp_min(1e-6)
+
+            plogp = out_logp.gather(-1, data["target"].long().unsqueeze(-1)).squeeze(-1)  # [B, L]
+            loss = -(plogp * mask).sum() / denom
+
+            plosses.append(loss)
+
+            pred = logits.argmax(dim=-1)  # [B, L]
+            acc = ((pred == data["target"].long()).float() * mask).sum() / denom
+            acces.append(acc.item())
            
 
         ploss_weight = [0.8 ** i for i in range(len(plosses))]
