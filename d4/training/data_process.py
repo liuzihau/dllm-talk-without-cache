@@ -13,7 +13,7 @@ def build_dataset_rank(
     datapath: str,
     max_len: int,
     *,
-    split: str = "train",
+    split: str = "chat",
     cache_root: str = "./hf_datasets_cache",
     num_proc: int = 8,
 ):
