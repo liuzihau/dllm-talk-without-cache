@@ -100,7 +100,7 @@ if checkpoint_path:
 
 # Assume data structure
 """
-data['inputs_ids']: [B, S + C]
+data['input_ids']: [B, S + C]
 data['target']: [B, C]
 data['attention_mask]': [B, S + C]
 data['loss_mask']: [B, S + C]
@@ -145,11 +145,11 @@ for epoch in range(start_epoch, num_epochs):
                 use_cache=False,
                 output_hidden_states=True)
             
+            logits = talk_outputs.logits
+            
             V = logits.size(-1)
             target_p = F.one_hot(data["target"], num_classes=V).float()
 
-            logits = talk_outputs.logits
-            
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
             plogp = target_p * out_logp
