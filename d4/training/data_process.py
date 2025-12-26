@@ -86,8 +86,7 @@ def build_dataset_rank(
         new_examples = {
             "attention_mask": [],
             "target": [],
-            "input_ids": [],
-            "loss_mask": []
+            "input_ids": []
         }
         for i in range(len(examples)):
             messages = [
