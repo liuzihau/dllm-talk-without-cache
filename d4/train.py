@@ -152,7 +152,7 @@ for epoch in range(start_epoch, num_epochs):
     for batch_idx, data in enumerate(tqdm(train_loader)):
         mask_bool = data['loss_mask'].bool()
         
-        model.zero_grad()
+        model_engine.zero_grad()
         with torch.no_grad():
             thought_outputs = model.run_thought_model(
                 input_ids=data["input_ids"].to(rank),
@@ -173,15 +173,16 @@ for epoch in range(start_epoch, num_epochs):
         input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
         for idx in range(model.length):
-        
+            talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
+
             talk_outputs = model_engine(
                 input_ids=input_ids.to(rank),
                 inputs_repres=rps,
-                attention_mask=data["attention_mask"].to(rank),
+                attention_mask=talk_attention_mask.to(rank),
                 use_cache=False,
                 output_hidden_states=True)
             
-            logits = talk_outputs.logits
+            logits = talk_outputs.logits.float()
             rps = talk_outputs.hidden_states
             out_logp = nn.LogSoftmax(dim=2)(logits)
 
