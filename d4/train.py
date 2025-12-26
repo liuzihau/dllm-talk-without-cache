@@ -104,7 +104,7 @@ set_seed(0)
 
 # Model / Tokenizer 
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
-model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.float16)
+model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
 criterion = nn.SmoothL1Loss(reduction="none")
 num_epochs = train_config["num_epochs"]
 model_engine, optimizer, _, _ = deepspeed.initialize(args=args,
