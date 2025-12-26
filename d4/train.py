@@ -19,7 +19,7 @@ from training.data_process import build_dataset_rank, DataCollatorWithPadding
 from training.utils import AttrDict
 
 # calculate loss work only when one-hot target
-def calculate_ploss(out_logp, mask, target):
+def calculate_ploss(out_logp, target, mask):
     denom = mask.sum().clamp_min(1e-6)
     plogp = out_logp.gather(-1, target.long().unsqueeze(-1)).squeeze(-1)  # [B, L]
     return -(plogp * mask).sum() / denom
@@ -170,8 +170,8 @@ for epoch in range(start_epoch, num_epochs):
             """
             target = data["target"].to(out_logp.device)
             mask = loss_mask.float().to(out_logp.device)  # [B, L]
-            loss = calculate_ploss(out_logp, loss_mask, target)
-            acc = calculate_acc()
+            loss = calculate_ploss(out_logp, target, mask)
+            acc = calculate_acc(logits, target, mask)
 
             plosses.append(loss)
             acces.append(acc.item())
