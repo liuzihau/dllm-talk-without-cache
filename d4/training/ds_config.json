@@ -1,6 +1,9 @@
 {
+    "bf16": {
+        "enabled": false
+    },
     "fp16": {
-        "enabled": "true",
+        "enabled": true,
         "auto_cast": "true",
         "loss_scale": 0,
         "loss_scale_window": 1000,
