@@ -319,7 +319,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:.2f}%", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:2.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -393,7 +393,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:.2f}", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:2.2f}", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):

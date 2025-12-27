@@ -109,6 +109,7 @@ def build_dataset_rank(
             messages.append(
                     {"role": "assistant", "content": response}
                 )
+            
             conversation = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -126,12 +127,14 @@ def build_dataset_rank(
 
             # filtering out the samples which is longer than max_len
             if len(full_ids) > max_len:
+                print(len(full_ids))
                 continue
             
             
             sep = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
             turns = conversation.split(sep)
             if len(turns) < 2:
+                print("turns < 2")
                 continue
 
             prompt = ""
@@ -141,8 +144,7 @@ def build_dataset_rank(
             target = full_ids[len(input_ids):]
 
             attention_mask = torch.ones_like(input_ids)
-            if attention_mask.shape[0] > 4096:
-                print(attention_mask.shape[0])
+
             # new_examples["conversation"].append(conversation)
             new_examples["input_ids"].append(input_ids[None, :])
             new_examples["target"].append(target[None, :])
