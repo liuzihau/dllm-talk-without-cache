@@ -206,12 +206,13 @@ for epoch in range(start_epoch, num_epochs):
         cache_hidden = [[], []]
         plosses = []
         acces = []
-        loss_mask = torch.ones_like(data["target"])
+        
 
         input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
+        talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
+        loss_mask = torch.ones_like(data["target"])
         for idx in range(model.length):
-            talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
 
             talk_outputs = model_engine(
                 input_ids=input_ids.to(rank),
@@ -222,7 +223,7 @@ for epoch in range(start_epoch, num_epochs):
             
             logits = talk_outputs.logits.float()
             rps = talk_outputs.hidden_states
-                out_logp = F.log_softmax(logits, dim=-1)
+            out_logp = F.log_softmax(logits, dim=-1)
 
             # calculate_ploss
             # V = logits.size(-1)
