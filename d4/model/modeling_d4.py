@@ -1971,7 +1971,7 @@ class LLaDATalkModel(nn.Module):
         self.fc = nn.Linear(config.d_model * 3, config.d_model)
 
         # When `init_device="meta"` FSDP will call `reset_parameters()` to initialize weights.
-        if init_params and self.config.init_device != "meta":
+        if init_params:# and self.config.init_device != "meta":
             self.reset_parameters()
             print("parameter has reset")
         self.__num_fwd_flops: Optional[int] = None
@@ -2296,7 +2296,8 @@ class D4ModelLM(PreTrainedModel):
 
         talk_ml_cfg = ModelConfig(**cfg_dict)
         talk_ml_cfg.init_device = "cpu"
-        self.talking_ml = LLaDATalkModel(talk_ml_cfg, init_params=init_params)
+
+        self.talking_ml = LLaDATalkModel(talk_ml_cfg, init_params=True)
 
         self.length = 4 # hardcording
 
