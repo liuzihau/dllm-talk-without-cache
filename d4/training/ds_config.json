@@ -48,8 +48,9 @@
     "train_micro_batch_size_per_gpu": 1,
     "wall_clock_breakdown": false,
     "training_parameters": {
-        "bs": 8,
-        "num_epochs": 40,
+        "wandb_name": "Tiny test[320 data pts]",
+        "bs": 16,
+        "num_epochs": 80,
         "num_workers": 2,
         "max_len": 8192,
         "config_path": "model/talk_ml_config.json",

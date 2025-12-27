@@ -193,7 +193,7 @@ if global_rank == 0:
     import wandb
 
     wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
-    wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
+    wandb.init(project="TalkingMachine", name=train_config["wandb_name"], config=ds_config)
 
 os.makedirs(args.savedir, exist_ok=True)
 
@@ -316,7 +316,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:6.2f}%", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:5.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -390,7 +390,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:6.2f}%", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:5.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
