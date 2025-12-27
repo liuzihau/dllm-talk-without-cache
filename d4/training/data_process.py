@@ -98,6 +98,7 @@ def build_dataset_rank(
             source = examples['input'][i]
             response = examples['output'][i]
             if not source or source[0]["role"] not in roles:
+                print(source[0]["role"])
                 continue
             # if len(source) > 1:
             #     print(len(source))
