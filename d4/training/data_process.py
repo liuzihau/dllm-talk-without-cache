@@ -136,6 +136,7 @@ def build_dataset_rank(
             turns = conversation.split(sep)
             if len(turns) < 2:
                 print("turns < 2")
+                raise Exception(f"SPLIT FAILED! \nSeparator '{sep}' NOT FOUND in:\n{conversation[:500]}...")
                 continue
 
             prompt = ""
