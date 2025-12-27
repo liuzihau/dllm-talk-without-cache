@@ -29,6 +29,21 @@ def print_param_summary(model):
     print(f"Trainable params: {trainable:,}")
     print(f"Frozen params:    {total - trainable:,}")
 
+def freeze_all_but_talking_ml(model: torch.nn.Module):
+    # Freeze all parameters
+    for p in model.parameters():
+        p.requires_grad = False
+
+    # Unfreeze talking_ml only
+    for p in model.talking_ml.parameters():
+        p.requires_grad = True
+
+    # Optional: sanity prints
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total params: {total:,}")
+    print(f"Trainable (talking_ml) params: {trainable:,}")
+
 # calculate loss work only when one-hot target
 def calculate_ploss(out_logp, target, mask):
     denom = mask.sum().clamp_min(1e-6)
@@ -116,6 +131,9 @@ set_seed(0)
 # Model / Tokenizer 
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
 model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
+freeze_all_but_talking_ml(model)
+model.model.eval()
+model.talking_ml.train()
 criterion = nn.SmoothL1Loss(reduction="none")
 num_epochs = train_config["num_epochs"]
 model_engine, optimizer, _, _ = deepspeed.initialize(args=args,
@@ -192,7 +210,6 @@ for epoch in range(start_epoch, num_epochs):
 
         input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
-        print_param_summary(model)
         for idx in range(model.length):
             talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
 
@@ -205,7 +222,7 @@ for epoch in range(start_epoch, num_epochs):
             
             logits = talk_outputs.logits.float()
             rps = talk_outputs.hidden_states
-            out_logp = nn.LogSoftmax(dim=2)(logits)
+                out_logp = F.log_softmax(logits, dim=-1)
 
             # calculate_ploss
             # V = logits.size(-1)
@@ -242,8 +259,8 @@ for epoch in range(start_epoch, num_epochs):
 
             # Calculate loss only on valid tokens
             # We use negative log likelihood: -log(p)
-            masked_logp = target_logp * loss_mask
-            loss = -masked_logp.mean()
+            mask = loss_mask.float()
+            loss = -(target_logp * mask).sum() / (mask.sum().clamp_min(1e-6))
 
             # Note: If loss_mask can be all zeros, mean() might be weak. 
             # You might prefer: loss = -(masked_logp.sum() / (loss_mask.sum() + 1e-6))
