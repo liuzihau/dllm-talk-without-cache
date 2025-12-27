@@ -48,7 +48,7 @@
     "train_micro_batch_size_per_gpu": 1,
     "wall_clock_breakdown": false,
     "training_parameters": {
-        "wandb_name": "Tiny test[320 data pts]",
+        "wandb_name": "2-decoder-layer",
         "bs": 16,
         "num_epochs": 80,
         "num_workers": 2,
