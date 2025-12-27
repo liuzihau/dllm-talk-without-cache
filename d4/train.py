@@ -315,10 +315,9 @@ for epoch in range(start_epoch, num_epochs):
             input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
            
 
-        ploss_weight = [0.99 ** i for i in range(len(plosses))]
+        ploss_weight = [0.8 ** i for i in range(len(plosses))]
         ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
         loss = ploss
-        print(f"before scale:{plosses}, after scale: {loss}")
         model_engine.backward(loss)
 
         model_engine.step()
@@ -352,7 +351,7 @@ for epoch in range(start_epoch, num_epochs):
 
     epoch_acces = [[] for _ in range(model.length)]
     epoch_plosses = [[] for _ in range(model.length)]
-
+    """
     for batch_idx, data in enumerate(tqdm(test_loader)):
         with torch.no_grad():
             plosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
@@ -379,7 +378,7 @@ for epoch in range(start_epoch, num_epochs):
         #     print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
     # clear out the redundance cahce after each step
     torch.cuda.empty_cache()
-
+    """
     model_engine.save_16bit_model(f"{args.savedir}/state_{epoch}", exclude_frozen_parameters=True)
     if epoch % 10 == 0:
         deepspeed.DeepSpeedEngine.save_checkpoint(model_engine, save_dir=f"{args.savedir}/state_{epoch}")
