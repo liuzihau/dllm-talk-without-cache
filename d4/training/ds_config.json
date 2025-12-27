@@ -48,7 +48,7 @@
     "train_micro_batch_size_per_gpu": 1,
     "wall_clock_breakdown": false,
     "training_parameters": {
-        "bs": 1,
+        "bs": 8,
         "num_epochs": 40,
         "num_workers": 2,
         "max_len": 8192,

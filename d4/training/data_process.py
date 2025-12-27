@@ -78,7 +78,8 @@ def build_dataset_rank(
             ds = load_from_disk(str(local_path))
 
     # 2) Normal pipeline (same spirit as EAGLE3)
-    ds = ds.shuffle(seed=42)
+    # TODO turn off debug
+    # ds = ds.shuffle(seed=42)
     ds1 = ds
     original_columns1 = ds1.column_names
 
@@ -88,7 +89,10 @@ def build_dataset_rank(
             "target": [],
             "input_ids": []
         }
-        for i in range(len(examples['input'])):
+        data_pts = len(examples['input'])
+        # TODO turn off debug
+        data_pts = 8
+        for i in range(data_pts):
             messages = [
                 {"role": "system",
                  "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
@@ -128,15 +132,12 @@ def build_dataset_rank(
 
             # filtering out the samples which is longer than max_len
             if len(full_ids) > max_len:
-                print(len(full_ids))
                 continue
             
             
             sep = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
             turns = conversation.split(sep)
             if len(turns) < 2:
-                print("turns < 2")
-                raise Exception(f"SPLIT FAILED! \nSeparator '{sep}' NOT FOUND in:\n{conversation[:500]}...")
                 continue
 
             prompt = ""
@@ -204,6 +205,9 @@ class DataCollatorWithPadding:
 
         # uniform integer in [0, max_starts[i)-1]
         starts = (torch.rand(B, device=device) * max_starts).long()  # [B]
+
+        # TODO turn off debug
+        starts = torch.ones((B,)).long() * 5
 
         # ---- compute final sequence lengths and max_length
         seq_lens = []
