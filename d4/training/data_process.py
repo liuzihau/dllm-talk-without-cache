@@ -141,7 +141,8 @@ def build_dataset_rank(
             target = full_ids[len(input_ids):]
 
             attention_mask = torch.ones_like(input_ids)
-
+            if attention_mask.shape[0] > 4096:
+                print(attention_mask.shape[0])
             # new_examples["conversation"].append(conversation)
             new_examples["input_ids"].append(input_ids[None, :])
             new_examples["target"].append(target[None, :])

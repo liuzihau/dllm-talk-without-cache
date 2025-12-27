@@ -180,6 +180,7 @@ world_size = deepspeed.comm.get_world_size()
 # Data
 traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
 testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
+print(f"Train data: {len(traindataset)}, Test data: {len(testdataset)}")
 
 sampler = DistributedSampler(testdataset, num_replicas=world_size, rank=global_rank, shuffle=False)
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], sampler=sampler, num_workers=4, pin_memory=True,
@@ -214,7 +215,6 @@ data['loss_mask']: [B, S + C]
 
 for epoch in range(start_epoch, num_epochs):
     # train_sampler.set_epoch(epoch+1)
-    print(f"Now training epoch {epoch}")
 
     model.talking_ml.train()
     epoch_acces = [[] for _ in range(model.length)]
@@ -319,7 +319,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"pos {i},  Acc: {acc_i:.2f}", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -328,7 +328,7 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochploss_{i}": loss_i})
-            print(f"pos {i}, pLoss: {loss_i:.2f}", end="\t")
+            print(f"pos {i}, pLoss: {loss_i:2.3f}", end="\t")
     print()
 
     
@@ -393,7 +393,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"pos {i},  Acc: {acc_i:.2f}", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:.2f}", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -402,7 +402,7 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochploss_{i}": loss_i})
-            print(f"pos{i}, pLoss: {loss_i:.2f}", end="\t")
+            print(f"pos {i}, pLoss: {loss_i:2.3f}", end="\t")
     print()
 
     # clear out the redundance cahce after each step
