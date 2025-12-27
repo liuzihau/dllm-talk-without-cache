@@ -136,6 +136,7 @@ def denoise_k_step(input_ids, target, loss_mask, k=1, generator=None):
     
     return input_ids, loss_mask
 
+SEED = 0
 
 # Args 
 parser = argparse.ArgumentParser(description='sp')
@@ -156,20 +157,28 @@ train_config = AttrDict(ds_config["training_parameters"])
 
 # Env related
 torch.backends.cuda.matmul.allow_tf32 = True
-set_seed(0)
+set_seed(SEED)
 
 # Tokenizer 
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
 
 # Data
-traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
-testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
+traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'], get_test_subset=False, seed=SEED)
+testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'], get_test_subset=True, seed=SEED)
 print(f"Train data: {len(traindataset)}, Test data: {len(testdataset)}")
 
 # Model
+if args.savedir == '0':
+   args.savedir = train_config["wandb_name"]
+os.makedirs(args.savedir, exist_ok=True)
 model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
 freeze_all_but_talking_ml(model)
-manual_init_talking_ml(model, model.talking_ml.config)
+checkpoint_path, start_epoch = find_max_state_with_file(args.savedir)
+if checkpoint_path:
+    print(f"load from {checkpoint_path}")
+    model.load_checkpoint(checkpoint_path)
+else:
+    manual_init_talking_ml(model, model.talking_ml.config)
 model.model.eval()
 model.talking_ml.train()
 
@@ -191,16 +200,8 @@ train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=t
 # Logging / checkpoints
 if global_rank == 0:
     import wandb
-
     wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
     wandb.init(project="TalkingMachine", name=train_config["wandb_name"], config=ds_config)
-
-os.makedirs(args.savedir, exist_ok=True)
-
-checkpoint_path, start_epoch = find_max_state_with_file(args.savedir)
-if checkpoint_path:
-    print(f"load from {checkpoint_path}")
-    model_engine.load_checkpoint(checkpoint_path)
 
 # Assume data structure
 """

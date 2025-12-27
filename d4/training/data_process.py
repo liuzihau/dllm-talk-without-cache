@@ -16,6 +16,9 @@ def build_dataset_rank(
     split: str = "chat",
     cache_root: str = "./hf_datasets_cache",
     num_proc: int = 8,
+    test_split_ratio: float = 0.05,  # e.g., 5% for testing
+    get_test_subset: bool = False,   # Set True to get the test split
+    seed: int = 42,                  # Fixed seed is CRITICAL for reproducibility
 ):
     """
     datapath:
@@ -78,9 +81,26 @@ def build_dataset_rank(
             ds = load_from_disk(str(local_path))
 
     # 2) Normal pipeline (same spirit as EAGLE3)
-    # TODO turn off debug
-    # ds = ds.shuffle(seed=42)
-    ds1 = ds
+    
+    ds = ds.shuffle(seed=seed)
+
+    # Perform the split logic only if requested
+    if test_split_ratio > 0 and len(ds) > 1:
+        # train_test_split is very efficient (just manipulates indices, doesn't copy data)
+        splits = ds.train_test_split(test_size=test_split_ratio, seed=seed)
+        
+        if get_test_subset:
+            ds1 = splits['test']
+            print(f"dataset rank: returning TEST split ({len(ds1)} examples)")
+        else:
+            ds1 = splits['train']
+            print(f"dataset rank: returning TRAIN split ({len(ds1)} examples)")
+    else:
+        # Fallback if ratio is 0 or dataset is too small
+        ds1 = ds
+        print(f"dataset rank: returning FULL dataset ({len(ds1)} examples)")
+
+    
     original_columns1 = ds1.column_names
 
     def preprocess_function(examples):
@@ -90,8 +110,10 @@ def build_dataset_rank(
             "input_ids": []
         }
         data_pts = len(examples['input'])
-        # TODO turn off debug
-        data_pts = 8
+
+        # # TODO turn off debug
+        # data_pts = 8
+        
         for i in range(data_pts):
             messages = [
                 {"role": "system",
@@ -206,8 +228,8 @@ class DataCollatorWithPadding:
         # uniform integer in [0, max_starts[i)-1]
         starts = (torch.rand(B, device=device) * max_starts).long()  # [B]
 
-        # TODO turn off debug
-        starts = torch.ones((B,)).long() * 5
+        # # TODO turn off debug
+        # starts = torch.ones((B,)).long() * 5
 
         # ---- compute final sequence lengths and max_length
         seq_lens = []
