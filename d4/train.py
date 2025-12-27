@@ -312,14 +312,15 @@ for epoch in range(start_epoch, num_epochs):
         epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
         epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
 
-
+    print(f"Train Epoch [{epoch + 1}/{num_epochs}]")
     for i in range(len(epoch_acces)):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+            print(f"pos {i},  Acc: {acc_i:.2f}", end="\t")
+    print()
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
@@ -327,7 +328,8 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochploss_{i}": loss_i})
-            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+            print(f"pos {i}, pLoss: {loss_i:.2f}", end="\t")
+    print()
 
     
     model.talking_ml.eval()
@@ -384,13 +386,15 @@ for epoch in range(start_epoch, num_epochs):
         epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
         epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
 
+    print(f"Test Epoch [{epoch + 1}/{num_epochs}]")
     for i in range(len(epoch_acces)):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+            print(f"pos {i},  Acc: {acc_i:.2f}", end="\t")
+    print()
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
@@ -398,7 +402,9 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochploss_{i}": loss_i})
-            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+            print(f"pos{i}, pLoss: {loss_i:.2f}", end="\t")
+    print()
+
     # clear out the redundance cahce after each step
     torch.cuda.empty_cache()
     
