@@ -19,6 +19,21 @@ from model.modeling_d4 import D4ModelLM
 from training.data_process import build_dataset_rank, DataCollatorWithPadding
 from training.utils import AttrDict
 
+def freeze_all_but_talking_ml(model: torch.nn.Module):
+    # Freeze all parameters
+    for p in model.parameters():
+        p.requires_grad = False
+
+    # Unfreeze talking_ml only
+    for p in model.talking_ml.parameters():
+        p.requires_grad = True
+
+    # Optional: sanity prints
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total params: {total:,}")
+    print(f"Trainable (talking_ml) params: {trainable:,}")
+    
 def manual_init_talking_ml(model, config):
     print("Applying manual initialization to talking_ml...")
     init_std = getattr(config, 'init_std', 0.02)
@@ -46,42 +61,30 @@ def manual_init_talking_ml(model, config):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-def print_param_summary(model):
-    total = trainable = 0
-    for n, p in model.named_parameters():
-        num = p.numel()
-        total += num
-        if p.requires_grad:
-            trainable += num
-    print(f"Total params:     {total:,}")
-    print(f"Trainable params: {trainable:,}")
-    print(f"Frozen params:    {total - trainable:,}")
-
-def freeze_all_but_talking_ml(model: torch.nn.Module):
-    # Freeze all parameters
-    for p in model.parameters():
-        p.requires_grad = False
-
-    # Unfreeze talking_ml only
-    for p in model.talking_ml.parameters():
-        p.requires_grad = True
-
-    # Optional: sanity prints
-    total = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total params: {total:,}")
-    print(f"Trainable (talking_ml) params: {trainable:,}")
-
 # calculate loss work only when one-hot target
-def calculate_ploss(out_logp, target, mask):
-    denom = mask.sum().clamp_min(1e-6)
-    plogp = out_logp.gather(-1, target.long().unsqueeze(-1)).squeeze(-1)  # [B, L]
-    return -(plogp * mask).sum() / denom
+def calculate_ploss(out_logp, target, loss_mask):
+    # Instead of one-hot multiplication, gather the log-prob of the correct indices
+    # data["target"] shape: [B, L] -> unsqueeze to [B, L, 1] for gather
+    target_indices = target.unsqueeze(-1).long()
 
-def calculate_acc(logits, target, mask):
-    denom = mask.sum().clamp_min(1e-6)
-    pred = logits.argmax(dim=-1)  # [B, L]
-    return ((pred == target.long()).float() * mask).sum() / denom
+    # Gather values along the vocab dimension (dim=2)
+    # resulting shape: [B, L, 1] -> squeeze back to [B, L]
+    target_logp = out_logp.gather(2, target_indices).squeeze(2)
+
+    # Calculate loss only on valid tokens
+    # We use negative log likelihood: -log(p)
+    mask = loss_mask.float()
+    return -(target_logp * mask).sum() / (mask.sum().clamp_min(1e-6))
+    # Note: If loss_mask can be all zeros, mean() might be weak. 
+    # You might prefer: loss = -(masked_logp.sum() / (loss_mask.sum() + 1e-6))
+    # But keeping consistent with your snippet:
+    # --- CORRECTED LOSS CALCULATION END ---
+
+def calculate_correct_counts(logits, target, loss_mask):
+    pred = logits.argmax(dim=-1)
+    correct = (pred == target) & loss_mask.bool()
+    return correct.sum().item(), loss_mask.sum().item()
+    # return correct.float().sum() / (loss_mask.sum() + 1e-6)
 
 def find_max_state_with_file(directory, filename="zero_to_fp32.py"):
     max_a = -1
@@ -188,11 +191,11 @@ train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=t
                           collate_fn=DataCollatorWithPadding())
 
 # Logging / checkpoints
-# if global_rank == 0:
-#     import wandb
+if global_rank == 0:
+    import wandb
 
-#     wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
-#     wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
+    wandb.login(key="671d7c1cf894df27e934d661945640534bbc5bd4")
+    wandb.init(project="TalkingMachine", name="2-decoder-layers", config=ds_config)
 
 os.makedirs(args.savedir, exist_ok=True)
 
@@ -228,25 +231,22 @@ for epoch in range(start_epoch, num_epochs):
                 output_hidden_states=True
             )
             thought_rps = thought_outputs.hidden_states  # [B, S + C, H]
-            if torch.isnan(thought_outputs.hidden_states).any():
-                print("CRITICAL: Thought model outputs NaN! Check base model loading.")
-                raise Exception("force leave")
-            else:
-                print("Thought model seems healthy.")
+            # if torch.isnan(thought_outputs.hidden_states).any():
+            #     print("CRITICAL: Thought model outputs NaN! Check base model loading.")
+            #     raise Exception("force leave")
             B = thought_rps.size(0)
             H = thought_rps.size(-1)
             thought_rps = thought_rps[mask_bool].view(B, -1, H)
         
 
-        cache_hidden = [[], []]
+        # cache_hidden = [[], []]
         plosses = []
         acces = []
         
-
         input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
         rps = thought_rps
         talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
-        loss_mask = torch.ones_like(data["target"])
+        loss_mask = torch.ones_like(data["target"], dtype=data["attention_mask"].dtype, device=input_ids.device)
         for idx in range(model.length):
 
             talk_outputs = model_engine(
@@ -285,32 +285,11 @@ for epoch in range(start_epoch, num_epochs):
             data["target"] = data["target"].to(rank)
             loss_mask = loss_mask.to(rank)
 
-            # Instead of one-hot multiplication, gather the log-prob of the correct indices
-            # data["target"] shape: [B, L] -> unsqueeze to [B, L, 1] for gather
-            target_indices = data["target"].unsqueeze(-1).long()
-
-            # Gather values along the vocab dimension (dim=2)
-            # resulting shape: [B, L, 1] -> squeeze back to [B, L]
-            target_logp = out_logp.gather(2, target_indices).squeeze(2)
-
-            # Calculate loss only on valid tokens
-            # We use negative log likelihood: -log(p)
-            mask = loss_mask.float()
-            loss = -(target_logp * mask).sum() / (mask.sum().clamp_min(1e-6))
-
-            # Note: If loss_mask can be all zeros, mean() might be weak. 
-            # You might prefer: loss = -(masked_logp.sum() / (loss_mask.sum() + 1e-6))
-            # But keeping consistent with your snippet:
-            # --- CORRECTED LOSS CALCULATION END ---
+            loss = calculate_ploss(out_logp, data["target"], loss_mask)
+            correct, total = calculate_correct_counts(logits, data["target"], loss_mask)
 
             plosses.append(loss)
-
-            # Calculate Accuracy (for logging)
-            pred = logits.argmax(dim=-1)
-            correct = (pred == data["target"]) & loss_mask.bool()
-            acc = correct.float().sum() / (loss_mask.sum() + 1e-6)
-            acces.append(acc.item())
-
+            acces.append(correct/total)
 
             input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
            
@@ -322,13 +301,14 @@ for epoch in range(start_epoch, num_epochs):
 
         model_engine.step()
 
-        # if global_rank == 0:
-        #     logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"]}
-        #     for i in range(len(plosses)):
-        #         logdict[f"train/ploss_{i}"] = plosses[i].item()
-        #     for i in range(len(acces)):
-        #         logdict[f"train/acc_{i}"] = acces[i]
-        #     wandb.log(logdict)
+        if global_rank == 0:
+            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"]}
+            for i in range(len(plosses)):
+                logdict[f"train/ploss_{i}"] = plosses[i].item()
+            for i in range(len(acces)):
+                logdict[f"train/acc_{i}"] = acces[i]
+            wandb.log(logdict)
+
         epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
         epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
 
@@ -337,48 +317,91 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
-        # if global_rank == 0:
-        #     wandb.log({f"train/epochacc_{i}": acc_i})
-        #     print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+        if global_rank == 0:
+            wandb.log({f"train/epochacc_{i}": acc_i})
+            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
         deepspeed.comm.all_reduce(loss_i, op=deepspeed.comm.ReduceOp.AVG)
         loss_i = loss_i.item()
-        # if global_rank == 0:
-        #     wandb.log({f"train/epochploss_{i}": loss_i})
-        #     print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+        if global_rank == 0:
+            wandb.log({f"train/epochploss_{i}": loss_i})
+            print(f"Train Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
 
+    
+    model.talking_ml.eval()
     epoch_acces = [[] for _ in range(model.length)]
     epoch_plosses = [[] for _ in range(model.length)]
-    """
     for batch_idx, data in enumerate(tqdm(test_loader)):
+        mask_bool = data['loss_mask'].bool()
+
         with torch.no_grad():
-            plosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
-                                                   attention_mask=data["attention_mask"].to(rank),
-                                                   loss_mask=data["loss_mask"],
-                                                   )
-            epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
-            epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
+            thought_outputs = model.run_thought_model(
+                input_ids=data["input_ids"].to(rank),
+                attention_mask=data["attention_mask"].to(rank),
+                use_cache=False,
+                output_hidden_states=True
+            )
+            thought_rps = thought_outputs.hidden_states  # [B, S + C, H]
+            B = thought_rps.size(0)
+            H = thought_rps.size(-1)
+            thought_rps = thought_rps[mask_bool].view(B, -1, H)
+
+            plosses = []
+            acces = []
+            
+            input_ids = data['input_ids'][mask_bool].view(data['input_ids'].size(0), -1)
+            rps = thought_rps
+            talk_attention_mask = torch.ones_like(input_ids, dtype=data["attention_mask"].dtype, device=input_ids.device)
+            loss_mask = torch.ones_like(data["target"])
+            for idx in range(model.length):
+                talk_outputs = model_engine(
+                    input_ids=input_ids.to(rank),
+                    inputs_repres=rps,
+                    attention_mask=talk_attention_mask.to(rank),
+                    use_cache=False,
+                    output_hidden_states=True)
+                
+                logits = talk_outputs.logits.float()
+                rps = talk_outputs.hidden_states
+                out_logp = F.log_softmax(logits, dim=-1)
+                V = logits.size(-1)
+                data["target"] = data["target"].to(rank)
+                loss_mask = loss_mask.to(rank)
+
+                loss = calculate_ploss(out_logp, data["target"], loss_mask)
+                correct, total = calculate_correct_counts(logits, data["target"], loss_mask)
+
+                plosses.append(loss)
+                acces.append(correct/total)
+
+                input_ids, loss_mask = denoise_k_step(input_ids.to(rank), data["target"], loss_mask)
+            
+            ploss_weight = [0.8 ** i for i in range(len(plosses))]
+            ploss = sum([ploss_weight[i] * plosses[i] for i in range(len(plosses))])
+
+        epoch_acces = [epoch_acces[i] + [acces[i]] for i in range(len(acces))]
+        epoch_plosses = [epoch_plosses[i] + [plosses[i].item()] for i in range(len(plosses))]
 
     for i in range(len(epoch_acces)):
         acc_i = torch.tensor(epoch_acces[i]).cuda().mean()
         deepspeed.comm.all_reduce(acc_i, op=deepspeed.comm.ReduceOp.AVG)
         acc_i = acc_i.item()
-        # if global_rank == 0:
-        #     wandb.log({f"test/epochacc_{i}": acc_i})
-        #     print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
+        if global_rank == 0:
+            wandb.log({f"test/epochacc_{i}": acc_i})
+            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i},  Acc: {acc_i:.2f}")
 
     for i in range(len(epoch_plosses)):
         loss_i = torch.tensor(epoch_plosses[i]).cuda().mean()
         deepspeed.comm.all_reduce(loss_i, op=deepspeed.comm.ReduceOp.AVG)
         loss_i = loss_i.item()
-        # if global_rank == 0:
-        #     wandb.log({f"test/epochploss_{i}": loss_i})
-        #     print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
+        if global_rank == 0:
+            wandb.log({f"test/epochploss_{i}": loss_i})
+            print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
     # clear out the redundance cahce after each step
     torch.cuda.empty_cache()
-    """
+    
     model_engine.save_16bit_model(f"{args.savedir}/state_{epoch}", exclude_frozen_parameters=True)
     if epoch % 10 == 0:
         deepspeed.DeepSpeedEngine.save_checkpoint(model_engine, save_dir=f"{args.savedir}/state_{epoch}")
