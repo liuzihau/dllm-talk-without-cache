@@ -158,34 +158,31 @@ train_config = AttrDict(ds_config["training_parameters"])
 torch.backends.cuda.matmul.allow_tf32 = True
 set_seed(0)
 
-
-# Model / Tokenizer 
+# Tokenizer 
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
-model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
-freeze_all_but_talking_ml(model)
-manual_init_talking_ml(model, model.talking_ml.config)
-model.model.eval()
-model.talking_ml.train()
-criterion = nn.SmoothL1Loss(reduction="none")
-num_epochs = train_config["num_epochs"]
-model_engine, optimizer, _, _ = deepspeed.initialize(args=args,
-                                                     model=model,
-                                                     model_parameters=model.talking_ml.parameters(),
-                                                     )
-
-global_rank = deepspeed.comm.get_rank()
-rank = deepspeed.comm.get_local_rank()
-world_size = deepspeed.comm.get_world_size()
 
 # Data
 traindataset = build_dataset_rank(tokenizer, args.trainpath, train_config['max_len'])
 testdataset = build_dataset_rank(tokenizer, args.testpath, train_config['max_len'])
 print(f"Train data: {len(traindataset)}, Test data: {len(testdataset)}")
 
+# Model
+model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
+freeze_all_but_talking_ml(model)
+manual_init_talking_ml(model, model.talking_ml.config)
+model.model.eval()
+model.talking_ml.train()
+
+# initialize training related function with deepspeed
+criterion = nn.SmoothL1Loss(reduction="none")
+num_epochs = train_config["num_epochs"]
+model_engine, optimizer, _, _ = deepspeed.initialize(args=args,model=model,model_parameters=model.talking_ml.parameters())
+global_rank = deepspeed.comm.get_rank()
+rank = deepspeed.comm.get_local_rank()
+world_size = deepspeed.comm.get_world_size()
 sampler = DistributedSampler(testdataset, num_replicas=world_size, rank=global_rank, shuffle=False)
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], sampler=sampler, num_workers=4, pin_memory=True,
                          collate_fn=DataCollatorWithPadding())
-
 train_sampler = DistributedSampler(traindataset, num_replicas=world_size, rank=global_rank, shuffle=True)
 train_loader = DataLoader(traindataset, batch_size=train_config["bs"], sampler=train_sampler, num_workers=4,
                           pin_memory=True,
@@ -319,7 +316,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:2.2f}%", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:6.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -328,7 +325,7 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"train/epochploss_{i}": loss_i})
-            print(f"pos {i}, pLoss: {loss_i:2.3f}", end="\t")
+            print(f"pos {i}, pLoss: {loss_i:6.3f}", end="\t")
     print()
 
     
@@ -393,7 +390,7 @@ for epoch in range(start_epoch, num_epochs):
         acc_i = acc_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochacc_{i}": acc_i})
-            print(f"pos {i},   Acc: {acc_i*100:2.2f}%", end="\t")
+            print(f"pos {i},   Acc: {acc_i*100:6.2f}%", end="\t")
     print()
 
     for i in range(len(epoch_plosses)):
@@ -402,7 +399,7 @@ for epoch in range(start_epoch, num_epochs):
         loss_i = loss_i.item()
         if global_rank == 0:
             wandb.log({f"test/epochploss_{i}": loss_i})
-            print(f"pos {i}, pLoss: {loss_i:2.3f}", end="\t")
+            print(f"pos {i}, pLoss: {loss_i:6.3f}", end="\t")
     print()
 
     # clear out the redundance cahce after each step
