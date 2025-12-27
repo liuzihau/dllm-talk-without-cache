@@ -1973,6 +1973,7 @@ class LLaDATalkModel(nn.Module):
         # When `init_device="meta"` FSDP will call `reset_parameters()` to initialize weights.
         if init_params and self.config.init_device != "meta":
             self.reset_parameters()
+            print("parameter has reset")
         self.__num_fwd_flops: Optional[int] = None
         # Warm up cache.
         if self.config.alibi:
