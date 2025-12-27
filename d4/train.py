@@ -18,6 +18,33 @@ from model.modeling_d4 import D4ModelLM
 from training.data_process import build_dataset_rank, DataCollatorWithPadding
 from training.utils import AttrDict
 
+def manual_init_talking_ml(model, config):
+    print("Applying manual initialization to talking_ml...")
+    init_std = getattr(config, 'init_std', 0.02)
+    
+    # 1. Initialize the FC layer (Critical Fix)
+    if hasattr(model.talking_ml, 'fc') and isinstance(model.talking_ml.fc, nn.Linear):
+        print("Initializing talking_ml.fc ...")
+        nn.init.normal_(model.talking_ml.fc.weight, std=init_std)
+        if model.talking_ml.fc.bias is not None:
+            nn.init.zeros_(model.talking_ml.fc.bias)
+
+    # 2. Initialize Transformer Blocks with Depth Scaling
+    # This prevents gradient explosion in deep layers
+    blocks = model.talking_ml.transformer.blocks
+    for layer_idx, block in enumerate(blocks):
+        scaled_std = init_std / math.sqrt(2 * (layer_idx + 1))
+        for name, module in block.named_modules():
+            if isinstance(module, nn.Linear):
+                # Output layers get scaled init
+                if "attn_out" in name or "ff_out" in name:
+                    nn.init.trunc_normal_(module.weight, mean=0.0, std=scaled_std, a=-3*scaled_std, b=3*scaled_std)
+                # Projections get standard init
+                elif "proj" in name: # q_proj, k_proj, etc.
+                    nn.init.trunc_normal_(module.weight, mean=0.0, std=init_std, a=-3*init_std, b=3*init_std)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
 def print_param_summary(model):
     total = trainable = 0
     for n, p in model.named_parameters():
@@ -132,6 +159,7 @@ set_seed(0)
 tokenizer = AutoTokenizer.from_pretrained('GSAI-ML/LLaDA-8B-Instruct')
 model = D4ModelLM.from_pretrained('GSAI-ML/LLaDA-8B-Instruct', trust_remote_code=True, torch_dtype=torch.bfloat16)
 freeze_all_but_talking_ml(model)
+manual_init_talking_ml(model, model.talking_ml.config)
 model.model.eval()
 model.talking_ml.train()
 criterion = nn.SmoothL1Loss(reduction="none")
@@ -199,10 +227,16 @@ for epoch in range(start_epoch, num_epochs):
                 output_hidden_states=True
             )
             thought_rps = thought_outputs.hidden_states  # [B, S + C, H]
+            if torch.isnan(thought_outputs.hidden_states).any():
+                print("CRITICAL: Thought model outputs NaN! Check base model loading.")
+                raise Exception("force leave")
+            else:
+                print("Thought model seems healthy.")
             B = thought_rps.size(0)
             H = thought_rps.size(-1)
             thought_rps = thought_rps[mask_bool].view(B, -1, H)
         
+
         cache_hidden = [[], []]
         plosses = []
         acces = []
