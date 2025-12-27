@@ -99,9 +99,9 @@ def build_dataset_rank(
             response = examples['output'][i]
             if not source or source[0]["role"] not in roles:
                 continue
-            if len(source) > 1:
-                print(len(source))
-                print(source)
+            # if len(source) > 1:
+            #     print(len(source))
+            #     print(source)
             for msg in source:
                 messages.append(
                     {"role": msg["role"], "content": msg["content"]}
